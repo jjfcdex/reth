@@ -265,6 +265,25 @@ pub trait EthApi<
     #[method(name = "fillTransaction")]
     async fn fill_transaction(&self, request: TxReq) -> RpcResult<FillTransaction<RawTx>>;
 
+    /// Extended version of `eth_call` that returns execution logs and detailed status.
+    /// 
+    /// This is similar to `eth_call` but returns additional information including:
+    /// - Event logs generated during execution
+    /// - Gas used
+    /// - Execution status
+    /// - Revert error messages
+    ///
+    /// Useful for debugging and analyzing smart contract executions.
+    #[method(name = "callX")]
+    async fn call_x(
+        &self,
+        request: TxReq,
+        block_number: Option<BlockId>,
+        state_overrides: Option<StateOverride>,
+        block_overrides: Option<Box<BlockOverrides>>,
+        call_args: Option<reth_rpc_eth_types::CallXArgs>,
+    ) -> RpcResult<reth_rpc_eth_types::LogOrRevert>;
+
     /// Simulate arbitrary number of transactions at an arbitrary blockchain index, with the
     /// optionality of state overrides
     #[method(name = "callMany")]
@@ -763,6 +782,26 @@ where
             request,
             block_number,
             EvmOverrides::new(state_overrides, block_overrides),
+        )
+        .await?)
+    }
+
+    /// Handler for: `eth_callX`
+    async fn call_x(
+        &self,
+        request: RpcTxReq<T::NetworkTypes>,
+        block_number: Option<BlockId>,
+        state_overrides: Option<StateOverride>,
+        block_overrides: Option<Box<BlockOverrides>>,
+        call_args: Option<reth_rpc_eth_types::CallXArgs>,
+    ) -> RpcResult<reth_rpc_eth_types::LogOrRevert> {
+        trace!(target: "rpc::eth", ?request, ?block_number, ?state_overrides, ?block_overrides, ?call_args, "Serving eth_callX");
+        Ok(EthCall::call_x(
+            self,
+            request,
+            block_number,
+            EvmOverrides::new(state_overrides, block_overrides),
+            call_args,
         )
         .await?)
     }
