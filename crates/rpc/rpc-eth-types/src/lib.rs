@@ -11,6 +11,7 @@
 pub mod block;
 pub mod builder;
 pub mod cache;
+pub mod call_x;
 pub mod error;
 pub mod fee_history;
 pub mod gas_oracle;
@@ -28,6 +29,7 @@ pub use cache::{
     config::EthStateCacheConfig, db::StateCacheDb, multi_consumer::MultiConsumerLruCache,
     EthStateCache,
 };
+pub use call_x::{CallXArgs, LogOrRevert};
 pub use error::{EthApiError, EthResult, RevertError, RpcInvalidTransactionError, SignError};
 pub use fee_history::{FeeHistoryCache, FeeHistoryCacheConfig, FeeHistoryEntry};
 pub use gas_oracle::{
