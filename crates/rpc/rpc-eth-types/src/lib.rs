@@ -14,6 +14,7 @@ use url as _;
 pub mod block;
 pub mod builder;
 pub mod cache;
+pub mod call_x;
 pub mod capabilities;
 pub mod error;
 pub mod fee_history;
@@ -34,6 +35,7 @@ pub use cache::{
     config::EthStateCacheConfig, db::StateCacheDb, multi_consumer::MultiConsumerLruCache,
     EthStateCache,
 };
+pub use call_x::{CallXArgs, LogOrRevert};
 pub use capabilities::{EthCapabilities, EthCapabilitiesHead, EthCapabilitiesResource};
 pub use error::{EthApiError, EthResult, RevertError, RpcInvalidTransactionError, SignError};
 pub use fee_history::{FeeHistoryCache, FeeHistoryCacheConfig, FeeHistoryEntry};
