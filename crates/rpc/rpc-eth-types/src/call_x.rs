@@ -4,19 +4,43 @@ use alloy_primitives::{Bytes, B256};
 use alloy_rpc_types_eth::Log;
 use serde::{Deserialize, Serialize};
 
+/// Helper module for serializing u64 as hex string
+mod hex_u64 {
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    pub(super) fn serialize<S>(value: &u64, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&format!("0x{:x}", value))
+    }
+
+    pub(super) fn deserialize<'de, D>(deserializer: D) -> Result<u64, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        let s = s.trim_start_matches("0x");
+        u64::from_str_radix(s, 16).map_err(serde::de::Error::custom)
+    }
+}
+
 /// Extended call result that includes logs and execution status
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LogOrRevert {
     /// Block number where the call was executed
+    #[serde(with = "hex_u64")]
     pub block_number: u64,
     /// Block hash where the call was executed
     pub block_hash: B256,
     /// Flashblock index where the call was executed
     pub flashblock_index: Option<u64>,
     /// Execution status (1 = success, 0 = failure)
+    #[serde(with = "hex_u64")]
     pub status: u64,
     /// Gas used by the call
+    #[serde(with = "hex_u64")]
     pub used_gas: u64,
     /// Logs generated during execution
     #[serde(skip_serializing_if = "Option::is_none")]
