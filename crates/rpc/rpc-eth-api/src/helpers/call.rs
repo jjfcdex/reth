@@ -327,7 +327,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
             block_id = BlockId::hash(block_hash);
             
             // Execute the transaction
-            let res = self.transact_call_at(request.clone(), block_id, overrides.clone()).await?;
+            let res = self.transact_call_at(request, block_id, overrides).await?;
             
             // Get block header for block number and timestamp
             let header = self.cache().get_header(block_hash).await
