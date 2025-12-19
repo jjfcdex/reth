@@ -36,6 +36,7 @@ pub struct LogOrRevert {
     pub block_hash: B256,
     /// Flashblock index where the call was executed
     pub flashblock_index: Option<u64>,
+    pub flashblock_number: Option<u64>,
     /// Execution status (1 = success, 0 = failure)
     #[serde(with = "hex_u64")]
     pub status: u64,
@@ -65,6 +66,7 @@ impl LogOrRevert {
             block_number,
             block_hash,
             flashblock_index: None,
+            flashblock_number: None,
             status: 1, // success
             used_gas,
             logs: Some(logs),
@@ -85,6 +87,7 @@ impl LogOrRevert {
             block_number,
             block_hash,
             flashblock_index: None,
+            flashblock_number: None,
             status: 0, // failure
             used_gas,
             logs,
