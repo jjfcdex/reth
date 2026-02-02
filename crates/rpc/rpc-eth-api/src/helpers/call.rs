@@ -31,16 +31,11 @@ use reth_revm::{
     db::{bal::EvmDatabaseError, State},
 };
 use reth_rpc_convert::{RpcConvert, RpcTxReq};
-use reth_rpc_eth_types::{
-    cache::db::StateProviderTraitObjWrapper,
-    error::{AsEthApiError, FromEthApiError},
-    simulate::{self, EthSimulateError},
-    EthApiError, StateCacheDb,
-};
+use reth_rpc_eth_types::{cache::db::StateProviderTraitObjWrapper, error::{AsEthApiError, FromEthApiError}, simulate::{self, EthSimulateError}, EthApiError, RevertError, StateCacheDb};
 use reth_storage_api::{BlockIdReader, ProviderTx, StateProviderBox};
 use revm::{
     context::Block,
-    context_interface::{result::ResultAndState, Transaction},
+    context_interface::{result::ResultAndState, result::ExecutionResult, Transaction},
     Database, DatabaseCommit,
 };
 use revm_inspectors::{access_list::AccessListInspector, transfer::TransferInspector};
