@@ -36,7 +36,8 @@ reth-chain-state.workspace = true
 reth-evm.workspace = true
 
 # rpc/net
-jsonrpsee = { workspace = true, features = ["server"] }
+jsonrpsee = { workspace = true, features = ["server", "ws-deflate"] }
+soketto = { version = "0.8", features = ["deflate"] }
 tower-http = { workspace = true, features = ["full"] }
 tower = { workspace = true, features = ["full"] }
 http.workspace = true
