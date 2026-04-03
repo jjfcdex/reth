@@ -1,4 +1,5 @@
 use jsonrpsee::server::ServerConfigBuilder;
+use soketto::{connection::Mode, extension::deflate::Deflate};
 use reth_node_core::{args::RpcServerArgs, utils::get_or_create_jwt_secret_from_path};
 use reth_rpc::ValidationApiConfig;
 use reth_rpc_eth_types::{EthConfig, EthStateCacheConfig, GasPriceOracleConfig};
@@ -218,10 +219,13 @@ impl RethRpcServerConfig for RpcServerArgs {
 
         if self.ws {
             let socket_address = SocketAddr::new(self.ws_addr, self.ws_port);
+            let ws_builder = self
+                .http_ws_server_builder()
+                .add_ws_extension(|| Box::new(Deflate::new(Mode::Server)) as Box<dyn soketto::extension::Extension + Send>);
             // Ensure WS CORS is applied regardless of HTTP being enabled
             config = config
                 .with_ws_address(socket_address)
-                .with_ws(self.http_ws_server_builder())
+                .with_ws(ws_builder)
                 .with_ws_cors(self.ws_allowed_origins.clone());
         }
 
