@@ -12,6 +12,8 @@ use alloy_eips::eip2930::AccessListResult;
 use alloy_evm::overrides::{apply_block_overrides, apply_state_overrides, OverrideBlockHashes};
 use alloy_network::TransactionBuilder;
 use alloy_primitives::{Bytes, B256, U256};
+use reth_rpc_eth_types::RevertError;
+use revm::context_interface::result::ExecutionResult;
 use alloy_rpc_types_eth::{
     simulate::{SimBlock, SimulatePayload, SimulatedBlock},
     state::{EvmOverrides, StateOverride},
@@ -310,8 +312,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
         overrides: EvmOverrides,
         call_args: Option<reth_rpc_eth_types::CallXArgs>,
     ) -> impl Future<Output = Result<reth_rpc_eth_types::LogOrRevert, Self::Error>> + Send {
-        use reth_rpc_eth_types::{LogOrRevert, RevertError};
-        use revm::context_interface::result::ExecutionResult;
+        use reth_rpc_eth_types::LogOrRevert;
 
         async move {
 
