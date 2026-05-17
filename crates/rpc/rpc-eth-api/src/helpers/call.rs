@@ -293,7 +293,8 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
         overrides: EvmOverrides,
         call_args: Option<reth_rpc_eth_types::CallXArgs>,
     ) -> impl Future<Output = Result<reth_rpc_eth_types::LogOrRevert, Self::Error>> + Send {
-        use reth_rpc_eth_types::LogOrRevert;
+        use reth_rpc_eth_types::{LogOrRevert, RevertError};
+        use revm::context_interface::result::ExecutionResult;
 
         async move {
 
@@ -317,7 +318,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                 .map_err(Self::Error::from_eth_err)?;
             
             let block_num = header.number();
-            let gas_used = res.result.gas_used();
+            let gas_used = res.result.tx_gas_used();
 
             // Check if we should ignore logs
             let should_ignore_logs = call_args.as_ref().map(|args| args.should_ignore_logs()).unwrap_or(false);
