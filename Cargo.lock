@@ -1031,7 +1031,7 @@ version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "40c48f72fd53cd289104fc64099abca73db4166ad86ea0b4341abe65af83dadc"
 dependencies = [
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -1042,7 +1042,7 @@ checksum = "291e6a250ff86cd4a820112fb8898808a366d8f9f58ce16d1f538353ad55747d"
 dependencies = [
  "anstyle",
  "once_cell_polyfill",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3427,7 +3427,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5172,7 +5172,7 @@ checksum = "3640c1c38b8e4e43584d8df18be5fc6b0aa314ce6ebf51b53313d4306cca8e46"
 dependencies = [
  "hermit-abi",
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5330,7 +5330,7 @@ dependencies = [
 [[package]]
 name = "jsonrpsee"
 version = "0.26.0"
-source = "git+https://github.com/jjfcdex/jsonrpsee?tag=0.26.0-fix001#a128fac1a4356dcef669fa2a3ea27e5d54171ae3"
+source = "git+https://github.com/jjfcdex/jsonrpsee?tag=0.26.0-fix002#b3d74a90e3ba0d859a0e3aaf14dbf0714540c15a"
 dependencies = [
  "jsonrpsee-client-transport",
  "jsonrpsee-core",
@@ -5347,7 +5347,7 @@ dependencies = [
 [[package]]
 name = "jsonrpsee-client-transport"
 version = "0.26.0"
-source = "git+https://github.com/jjfcdex/jsonrpsee?tag=0.26.0-fix001#a128fac1a4356dcef669fa2a3ea27e5d54171ae3"
+source = "git+https://github.com/jjfcdex/jsonrpsee?tag=0.26.0-fix002#b3d74a90e3ba0d859a0e3aaf14dbf0714540c15a"
 dependencies = [
  "base64 0.22.1",
  "futures-channel",
@@ -5371,7 +5371,7 @@ dependencies = [
 [[package]]
 name = "jsonrpsee-core"
 version = "0.26.0"
-source = "git+https://github.com/jjfcdex/jsonrpsee?tag=0.26.0-fix001#a128fac1a4356dcef669fa2a3ea27e5d54171ae3"
+source = "git+https://github.com/jjfcdex/jsonrpsee?tag=0.26.0-fix002#b3d74a90e3ba0d859a0e3aaf14dbf0714540c15a"
 dependencies = [
  "async-trait",
  "bytes",
@@ -5398,7 +5398,7 @@ dependencies = [
 [[package]]
 name = "jsonrpsee-http-client"
 version = "0.26.0"
-source = "git+https://github.com/jjfcdex/jsonrpsee?tag=0.26.0-fix001#a128fac1a4356dcef669fa2a3ea27e5d54171ae3"
+source = "git+https://github.com/jjfcdex/jsonrpsee?tag=0.26.0-fix002#b3d74a90e3ba0d859a0e3aaf14dbf0714540c15a"
 dependencies = [
  "base64 0.22.1",
  "http-body",
@@ -5420,7 +5420,7 @@ dependencies = [
 [[package]]
 name = "jsonrpsee-proc-macros"
 version = "0.26.0"
-source = "git+https://github.com/jjfcdex/jsonrpsee?tag=0.26.0-fix001#a128fac1a4356dcef669fa2a3ea27e5d54171ae3"
+source = "git+https://github.com/jjfcdex/jsonrpsee?tag=0.26.0-fix002#b3d74a90e3ba0d859a0e3aaf14dbf0714540c15a"
 dependencies = [
  "heck",
  "proc-macro-crate",
@@ -5432,7 +5432,7 @@ dependencies = [
 [[package]]
 name = "jsonrpsee-server"
 version = "0.26.0"
-source = "git+https://github.com/jjfcdex/jsonrpsee?tag=0.26.0-fix001#a128fac1a4356dcef669fa2a3ea27e5d54171ae3"
+source = "git+https://github.com/jjfcdex/jsonrpsee?tag=0.26.0-fix002#b3d74a90e3ba0d859a0e3aaf14dbf0714540c15a"
 dependencies = [
  "futures-util",
  "http",
@@ -5458,7 +5458,7 @@ dependencies = [
 [[package]]
 name = "jsonrpsee-types"
 version = "0.26.0"
-source = "git+https://github.com/jjfcdex/jsonrpsee?tag=0.26.0-fix001#a128fac1a4356dcef669fa2a3ea27e5d54171ae3"
+source = "git+https://github.com/jjfcdex/jsonrpsee?tag=0.26.0-fix002#b3d74a90e3ba0d859a0e3aaf14dbf0714540c15a"
 dependencies = [
  "http",
  "serde",
@@ -5469,7 +5469,7 @@ dependencies = [
 [[package]]
 name = "jsonrpsee-wasm-client"
 version = "0.26.0"
-source = "git+https://github.com/jjfcdex/jsonrpsee?tag=0.26.0-fix001#a128fac1a4356dcef669fa2a3ea27e5d54171ae3"
+source = "git+https://github.com/jjfcdex/jsonrpsee?tag=0.26.0-fix002#b3d74a90e3ba0d859a0e3aaf14dbf0714540c15a"
 dependencies = [
  "jsonrpsee-client-transport",
  "jsonrpsee-core",
@@ -5480,7 +5480,7 @@ dependencies = [
 [[package]]
 name = "jsonrpsee-ws-client"
 version = "0.26.0"
-source = "git+https://github.com/jjfcdex/jsonrpsee?tag=0.26.0-fix001#a128fac1a4356dcef669fa2a3ea27e5d54171ae3"
+source = "git+https://github.com/jjfcdex/jsonrpsee?tag=0.26.0-fix002#b3d74a90e3ba0d859a0e3aaf14dbf0714540c15a"
 dependencies = [
  "http",
  "jsonrpsee-client-transport",
@@ -6240,7 +6240,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -11366,7 +11366,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -11446,7 +11446,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs 1.0.7",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -12079,7 +12079,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "52d1cfed4120b4d927bf7c0f86d2087a4a7d6027c906d9f9d525a80573b9be51"
 dependencies = [
  "libc",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -12339,7 +12339,7 @@ dependencies = [
  "getrandom 0.4.2",
  "once_cell",
  "rustix",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -13602,7 +13602,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
