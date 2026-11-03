@@ -9975,6 +9975,7 @@ dependencies = [
  "alloy-rpc-types-trace",
  "clap",
  "dyn-clone",
+ "flate2",
  "http",
  "jsonrpsee",
  "metrics",

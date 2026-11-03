@@ -1,26 +1,6 @@
+use crate::ws_deflate::DecodeOnlyDeflate;
 use jsonrpsee::server::ServerConfigBuilder;
-use soketto::{
-    base::Header,
-    connection::Mode,
-    extension::{self, deflate::Deflate},
-    BoxedError, Storage,
-};
 use reth_node_core::{args::RpcServerArgs, utils::get_or_create_jwt_secret_from_path};
-
-/// Wrapper around [`Deflate`] that only decompresses incoming (client→server) data.
-/// Outgoing (server→client) data is sent uncompressed.
-#[derive(Debug)]
-struct DecodeOnlyDeflate(Deflate);
-
-impl extension::Extension for DecodeOnlyDeflate {
-    fn name(&self) -> &str { self.0.name() }
-    fn is_enabled(&self) -> bool { self.0.is_enabled() }
-    fn params(&self) -> &[extension::Param<'_>] { self.0.params() }
-    fn configure(&mut self, params: &[extension::Param<'_>]) -> Result<(), BoxedError> { self.0.configure(params) }
-    fn reserved_bits(&self) -> (bool, bool, bool) { self.0.reserved_bits() }
-    fn decode(&mut self, header: &mut Header, data: &mut Vec<u8>) -> Result<(), BoxedError> { self.0.decode(header, data) }
-    fn encode(&mut self, _header: &mut Header, _data: &mut Storage<'_>) -> Result<(), BoxedError> { Ok(()) }
-}
 use reth_rpc::ValidationApiConfig;
 use reth_rpc_eth_types::{EthConfig, EthStateCacheConfig, GasPriceOracleConfig};
 use reth_rpc_layer::{JwtError, JwtSecret};
@@ -239,9 +219,12 @@ impl RethRpcServerConfig for RpcServerArgs {
 
         if self.ws {
             let socket_address = SocketAddr::new(self.ws_addr, self.ws_port);
-            let ws_builder = self
-                .http_ws_server_builder()
-                .add_ws_extension(|| Box::new(DecodeOnlyDeflate(Deflate::new(Mode::Server))) as Box<dyn soketto::extension::Extension + Send>);
+            // Inflate compressed client messages; cap the inflated size at the request limit.
+            let max_inflated_size = self.rpc_max_request_size_bytes() as usize;
+            let ws_builder = self.http_ws_server_builder().add_ws_extension(move || {
+                Box::new(DecodeOnlyDeflate::new(max_inflated_size))
+                    as Box<dyn soketto::extension::Extension + Send>
+            });
             // Ensure WS CORS is applied regardless of HTTP being enabled
             config = config
                 .with_ws_address(socket_address)
