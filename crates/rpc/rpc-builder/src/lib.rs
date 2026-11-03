@@ -87,6 +87,9 @@ pub mod auth;
 /// RPC server utilities.
 pub mod config;
 
+/// Decode-only `permessage-deflate` for the WS server.
+mod ws_deflate;
+
 /// Utils for installing Rpc middleware
 pub mod middleware;
 
