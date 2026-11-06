@@ -1,3 +1,4 @@
+use crate::ws_deflate::DecodeOnlyDeflate;
 use jsonrpsee::server::ServerConfigBuilder;
 use reth_node_core::{args::RpcServerArgs, utils::get_or_create_jwt_secret_from_path};
 use reth_rpc::ValidationApiConfig;
@@ -218,10 +219,16 @@ impl RethRpcServerConfig for RpcServerArgs {
 
         if self.ws {
             let socket_address = SocketAddr::new(self.ws_addr, self.ws_port);
+            // Inflate compressed client messages; cap the inflated size at the request limit.
+            let max_inflated_size = self.rpc_max_request_size_bytes() as usize;
+            let ws_builder = self.http_ws_server_builder().add_ws_extension(move || {
+                Box::new(DecodeOnlyDeflate::new(max_inflated_size))
+                    as Box<dyn soketto::extension::Extension + Send>
+            });
             // Ensure WS CORS is applied regardless of HTTP being enabled
             config = config
                 .with_ws_address(socket_address)
-                .with_ws(self.http_ws_server_builder())
+                .with_ws(ws_builder)
                 .with_ws_cors(self.ws_allowed_origins.clone());
         }
 

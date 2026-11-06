@@ -36,12 +36,15 @@ use reth_rpc_eth_types::{
     cache::db::StateProviderTraitObjWrapper,
     error::{AsEthApiError, FromEthApiError},
     simulate::{self, EthSimulateError},
-    EthApiError, StateCacheDb,
+    EthApiError, RevertError, StateCacheDb,
 };
 use reth_storage_api::{BlockIdReader, ProviderTx};
 use revm::{
     context::Block,
-    context_interface::{result::ResultAndState, Cfg, Transaction},
+    context_interface::{
+        result::{ExecutionResult, ResultAndState},
+        Cfg, Transaction,
+    },
     Database, DatabaseCommit,
 };
 use revm_inspectors::{access_list::AccessListInspector, transfer::TransferInspector};
@@ -289,6 +292,99 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                 self.transact_call_at(request, block_number.unwrap_or_default(), overrides).await?;
 
             Self::Error::ensure_success(res.result)
+        }
+    }
+
+    /// Executes the call request (`eth_callX`) and returns extended output including logs
+    fn call_x(
+        &self,
+        request: RpcTxReq<<Self::RpcConvert as RpcConvert>::Network>,
+        block_number: Option<BlockId>,
+        overrides: EvmOverrides,
+        call_args: Option<reth_rpc_eth_types::CallXArgs>,
+    ) -> impl Future<Output = Result<reth_rpc_eth_types::LogOrRevert, Self::Error>> + Send {
+        use reth_rpc_eth_types::LogOrRevert;
+
+        async move {
+            let mut block_id = block_number.unwrap_or_default();
+            // Get block hash
+            let block_hash = if let BlockId::Hash(hash) = block_id {
+                hash.block_hash
+            } else {
+                self.provider()
+                    .block_hash_for_id(block_id)
+                    .map_err(Self::Error::from_eth_err)?
+                    .ok_or(EthApiError::HeaderNotFound(block_id))?
+            };
+            // must be BlockId::Hash
+            block_id = BlockId::hash(block_hash);
+
+            // Execute the transaction
+            let res = self.transact_call_at(request, block_id, overrides).await?;
+
+            // Get block header for block number and timestamp
+            let header =
+                self.cache().get_header(block_hash).await.map_err(Self::Error::from_eth_err)?;
+
+            let block_num = header.number();
+            let gas_used = res.result.tx_gas_used();
+
+            // Check if we should ignore logs
+            let should_ignore_logs =
+                call_args.as_ref().map(|args| args.should_ignore_logs()).unwrap_or(false);
+
+            // Get logs from the execution result (if available and not ignored)
+            let logs = if !should_ignore_logs {
+                res.result
+                    .logs()
+                    .iter()
+                    .map(|log| alloy_rpc_types_eth::Log {
+                        inner: alloy_primitives::Log {
+                            address: log.address,
+                            data: log.data.clone(),
+                        },
+                        block_hash: Some(block_hash),
+                        block_number: Some(block_num),
+                        block_timestamp: Some(header.timestamp()),
+                        transaction_hash: None, // eth_call doesn't have a transaction hash
+                        transaction_index: None,
+                        log_index: None,
+                        removed: false,
+                    })
+                    .collect::<Vec<_>>()
+            } else {
+                Vec::new()
+            };
+
+            match &res.result {
+                ExecutionResult::Success { output, .. } => Ok(LogOrRevert::new_success(
+                    block_num,
+                    block_hash,
+                    gas_used,
+                    logs,
+                    output.clone().into_data(),
+                )),
+                ExecutionResult::Revert { output, .. } => {
+                    let revert_error = RevertError::new(output.clone()).to_string();
+                    Ok(LogOrRevert::new_failure(
+                        block_num,
+                        block_hash,
+                        gas_used,
+                        if should_ignore_logs { None } else { Some(logs) },
+                        Some(revert_error),
+                    ))
+                }
+                ExecutionResult::Halt { reason, .. } => {
+                    let halt_error = format!("execution halted: {:?}", reason);
+                    Ok(LogOrRevert::new_failure(
+                        block_num,
+                        block_hash,
+                        gas_used,
+                        if should_ignore_logs { None } else { Some(logs) },
+                        Some(halt_error),
+                    ))
+                }
+            }
         }
     }
 

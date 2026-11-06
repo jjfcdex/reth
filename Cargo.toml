@@ -694,3 +694,14 @@ vergen-git2 = "10.0.1"
 
 # networking
 ipnet = "2.11"
+
+[patch.crates-io]
+jsonrpsee = { git = "https://github.com/jjfcdex/jsonrpsee", tag = "0.26.0-fix002" }
+jsonrpsee-core = { git = "https://github.com/jjfcdex/jsonrpsee", tag = "0.26.0-fix002" }
+jsonrpsee-server = { git = "https://github.com/jjfcdex/jsonrpsee", tag = "0.26.0-fix002" }
+jsonrpsee-http-client = { git = "https://github.com/jjfcdex/jsonrpsee", tag = "0.26.0-fix002" }
+jsonrpsee-types = { git = "https://github.com/jjfcdex/jsonrpsee", tag = "0.26.0-fix002" }
+jsonrpsee-client-transport = { git = "https://github.com/jjfcdex/jsonrpsee", tag = "0.26.0-fix002" }
+jsonrpsee-proc-macros = { git = "https://github.com/jjfcdex/jsonrpsee", tag = "0.26.0-fix002" }
+jsonrpsee-wasm-client = { git = "https://github.com/jjfcdex/jsonrpsee", tag = "0.26.0-fix002" }
+jsonrpsee-ws-client = { git = "https://github.com/jjfcdex/jsonrpsee", tag = "0.26.0-fix002" }
