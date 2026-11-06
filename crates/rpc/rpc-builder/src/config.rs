@@ -1,5 +1,12 @@
 use jsonrpsee::server::ServerConfigBuilder;
 use reth_node_core::{args::RpcServerArgs, utils::get_or_create_jwt_secret_from_path};
+use soketto::{
+    base::Header,
+    connection::Mode,
+    extension::{self, deflate::Deflate},
+    BoxedError, Storage,
+};
+
 use reth_rpc::ValidationApiConfig;
 use reth_rpc_eth_types::{EthConfig, EthStateCacheConfig, GasPriceOracleConfig};
 use reth_rpc_layer::{JwtError, JwtSecret};
@@ -224,10 +231,14 @@ impl RethRpcServerConfig for RpcServerArgs {
 
         if self.ws {
             let socket_address = SocketAddr::new(self.ws_addr, self.ws_port);
+            let ws_builder = self.http_ws_server_builder().add_ws_extension(|| {
+                Box::new(DecodeOnlyDeflate(Deflate::new(Mode::Server)))
+                    as Box<dyn soketto::extension::Extension + Send>
+            });
             // Ensure WS CORS is applied regardless of HTTP being enabled
             config = config
                 .with_ws_address(socket_address)
-                .with_ws(self.http_ws_server_builder())
+                .with_ws(ws_builder)
                 .with_ws_cors(self.ws_allowed_origins.clone());
         }
 
@@ -444,5 +455,133 @@ mod tests {
 
         let secret = args.auth_jwt_secret(std::env::temp_dir().join("unused.jwt")).unwrap();
         assert_eq!(secret, JwtSecret::from_hex(hex).unwrap());
+    }
+}
+
+/// Wrapper around [`Deflate`] that only decompresses incoming (client→server) data.
+/// Outgoing (server→client) data is sent uncompressed.
+#[derive(Debug)]
+struct DecodeOnlyDeflate(Deflate);
+
+impl extension::Extension for DecodeOnlyDeflate {
+    fn name(&self) -> &str {
+        self.0.name()
+    }
+    fn is_enabled(&self) -> bool {
+        self.0.is_enabled()
+    }
+    fn params(&self) -> &[extension::Param<'_>] {
+        self.0.params()
+    }
+    fn configure(&mut self, params: &[extension::Param<'_>]) -> Result<(), BoxedError> {
+        self.0.configure(params)
+    }
+    fn reserved_bits(&self) -> (bool, bool, bool) {
+        self.0.reserved_bits()
+    }
+    fn decode(&mut self, header: &mut Header, data: &mut Vec<u8>) -> Result<(), BoxedError> {
+        self.0.decode(header, data)
+    }
+    fn encode(&mut self, _header: &mut Header, _data: &mut Storage<'_>) -> Result<(), BoxedError> {
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod decode_only_tests {
+    use super::DecodeOnlyDeflate;
+    use soketto::{
+        base::{Header, OpCode},
+        connection::Mode,
+        extension::{deflate::Deflate, Extension},
+        Storage,
+    };
+
+    #[test]
+    fn ws_inflates_client_requests() {
+        let request = br#"{"jsonrpc":"2.0","method":"eth_callX","id":1}"#;
+        let mut client = Deflate::new(Mode::Client);
+        let mut server = DecodeOnlyDeflate(Deflate::new(Mode::Server));
+        server.configure(client.params()).unwrap();
+        assert!(server.is_enabled());
+        let mut header = Header::new(OpCode::Text);
+        header.set_fin(true);
+        let mut wire = Storage::Owned(request.to_vec());
+        client.encode(&mut header, &mut wire).unwrap();
+        assert!(header.is_rsv1());
+        let mut decoded = wire.as_ref().to_vec();
+        server.decode(&mut header, &mut decoded).unwrap();
+        assert_eq!(decoded, request);
+        assert!(!header.is_rsv1());
+    }
+
+    #[test]
+    fn ws_sends_plain_responses_after_negotiation() {
+        let response = br#"{"jsonrpc":"2.0","id":1,"result":"0x1"}"#;
+        let mut server = DecodeOnlyDeflate(Deflate::new(Mode::Server));
+        server.configure(&[]).unwrap();
+        assert!(server.is_enabled());
+        let mut header = Header::new(OpCode::Text);
+        header.set_fin(true);
+        header.set_payload_len(response.len());
+        let mut wire = Storage::Owned(response.to_vec());
+        server.encode(&mut header, &mut wire).unwrap();
+        assert_eq!(wire.as_ref(), response);
+        assert!(!header.is_rsv1());
+        assert_eq!(header.payload_len(), response.len());
+    }
+    #[tokio::test]
+    async fn ws_negotiates_and_serves_compressed_request_with_plain_response() {
+        use jsonrpsee::{
+            server::{ServerBuilder, ServerConfigBuilder},
+            RpcModule,
+        };
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+            let config = ServerConfigBuilder::default().add_ws_extension(|| {
+                Box::new(DecodeOnlyDeflate(Deflate::new(Mode::Server)))
+                    as Box<dyn soketto::extension::Extension + Send>
+            });
+            let server = ServerBuilder::default().set_config(config.build())
+                .build("127.0.0.1:0").await.unwrap();
+            let address = server.local_addr().unwrap();
+            let mut module = RpcModule::new(());
+            module.register_method("eth_callX", |_, _, _| "transport-ok").unwrap();
+            let handle = server.start(module);
+            let mut socket = tokio::net::TcpStream::connect(address).await.unwrap();
+            let handshake = format!("GET / HTTP/1.1\r\nHost: {address}\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Extensions: permessage-deflate; server_no_context_takeover; client_no_context_takeover\r\n\r\n");
+            socket.write_all(handshake.as_bytes()).await.unwrap();
+            let mut headers = Vec::new();
+            while !headers.ends_with(b"\r\n\r\n") {
+                headers.push(socket.read_u8().await.unwrap());
+                assert!(headers.len() < 8192);
+            }
+            let headers = String::from_utf8(headers).unwrap().to_ascii_lowercase();
+            assert!(headers.starts_with("http/1.1 101"));
+            assert!(headers.contains("sec-websocket-extensions: permessage-deflate"));
+            let mut client = Deflate::new(Mode::Client);
+            let mut frame = Header::new(OpCode::Text);
+            frame.set_fin(true);
+            let mut wire = Storage::Owned(br#"{"jsonrpc":"2.0","method":"eth_callX","id":1}"#.to_vec());
+            client.encode(&mut frame, &mut wire).unwrap();
+            assert!(frame.is_rsv1());
+            assert!(wire.as_ref().len() < 126);
+            let mask = [1u8, 2, 3, 4];
+            let mut packet = vec![0xc1, 0x80 | wire.as_ref().len() as u8];
+            packet.extend_from_slice(&mask);
+            packet.extend(wire.as_ref().iter().enumerate().map(|(i, byte)| byte ^ mask[i % 4]));
+            socket.write_all(&packet).await.unwrap();
+            let first = socket.read_u8().await.unwrap();
+            assert_eq!(first, 0x81, "server must send plain final text without RSV1");
+            let length = socket.read_u8().await.unwrap();
+            assert!(length < 126, "server response must be short and unmasked");
+            let mut response = vec![0; length as usize];
+            socket.read_exact(&mut response).await.unwrap();
+            let response: serde_json::Value = serde_json::from_slice(&response).unwrap();
+            assert_eq!(response["id"], 1);
+            assert_eq!(response["result"], "transport-ok");
+            handle.stop().unwrap();
+            handle.stopped().await;
+        }).await.expect("local WS transport test timed out");
     }
 }

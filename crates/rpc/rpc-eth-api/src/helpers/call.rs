@@ -39,12 +39,15 @@ use reth_rpc_eth_types::{
     cache::db::attach_bal_before_tx,
     error::{AsEthApiError, FromEthApiError},
     simulate::{self, EthSimulateError},
-    EthApiError, StateCacheDb,
+    EthApiError, RevertError, StateCacheDb,
 };
 use reth_storage_api::{BlockIdReader, ProviderTx};
 use revm::{
     context::Block,
-    context_interface::{result::ResultAndState, Cfg, Transaction},
+    context_interface::{
+        result::{ExecutionResult, ResultAndState},
+        Cfg, Transaction,
+    },
     Database, DatabaseCommit,
 };
 use revm_inspectors::{access_list::AccessListInspector, transfer::TransferInspector};
@@ -308,6 +311,62 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                 self.transact_call_at(request, block_number.unwrap_or_default(), overrides).await?;
 
             Self::Error::ensure_success(res.result)
+        }
+    }
+
+    /// Executes the call request (`eth_callX`) and returns extended output including logs
+    fn call_x(
+        &self,
+        request: RpcTxReq<<Self::RpcConvert as RpcConvert>::Network>,
+        block_number: Option<BlockId>,
+        overrides: EvmOverrides,
+        call_args: Option<reth_rpc_eth_types::CallXArgs>,
+    ) -> impl Future<Output = Result<reth_rpc_eth_types::LogOrRevert, Self::Error>> + Send {
+        async move {
+            let target = block_number.unwrap_or_default();
+            let pending = target.is_pending();
+            let block_hash = if pending {
+                // A preconfirmation has no canonical hash (Subblocks may supply zero roots).
+                B256::ZERO
+            } else if let BlockId::Hash(hash) = target {
+                hash.block_hash
+            } else {
+                self.provider()
+                    .block_hash_for_id(target)
+                    .map_err(Self::Error::from_eth_err)?
+                    .ok_or(EthApiError::HeaderNotFound(target))?
+            };
+            let target = if pending { target } else { BlockId::hash(block_hash) };
+            let permit = self
+                .acquire_owned_blocking_io()
+                .await
+                .map_err(|_| EthApiError::InternalEthError)?;
+            let guard = CancelOnDrop::default();
+            let cancel = guard.clone();
+            // Use the same pending environment/state hooks as eth_call. In particular, never
+            // turn pending into a canonical hash: OP overlays use their canonical anchor.
+            let (evm_env, at) = self.evm_env_at(target).await?;
+            let block_num = evm_env.block_env.number().saturating_to::<u64>();
+            let timestamp = evm_env.block_env.timestamp().saturating_to::<u64>();
+            let res = self
+                .spawn_with_state_at_block(at, move |this, mut db| {
+                    let _permit = permit;
+                    if cancel.is_cancelled() {
+                        return Err(EthApiError::InternalEthError.into());
+                    }
+                    let (evm_env, tx_env) =
+                        this.prepare_call_env(evm_env, request, &mut db, overrides)?;
+                    this.transact(&mut db, evm_env, tx_env)
+                })
+                .await?;
+            drop(guard);
+            Ok(call_x_result(
+                &res.result,
+                block_num,
+                (!pending).then_some(block_hash),
+                timestamp,
+                call_args.as_ref().is_some_and(|args| args.should_ignore_logs()),
+            ))
         }
     }
 
@@ -922,5 +981,134 @@ pub trait Call:
         }
 
         Ok((evm_env, tx_env))
+    }
+}
+
+/// Builds CallX metadata from the actual execution environment. An absent hash denotes pending;
+/// synthetic calls never claim mined transaction or log indexes.
+fn call_x_result<H: fmt::Debug>(
+    result: &ExecutionResult<H>,
+    block_number: u64,
+    block_hash: Option<B256>,
+    timestamp: u64,
+    ignore_logs: bool,
+) -> reth_rpc_eth_types::LogOrRevert {
+    use reth_rpc_eth_types::LogOrRevert;
+    let logs = if ignore_logs {
+        Vec::new()
+    } else {
+        result
+            .logs()
+            .iter()
+            .map(|log| alloy_rpc_types_eth::Log {
+                inner: log.clone(),
+                block_hash,
+                block_number: Some(block_number),
+                block_timestamp: Some(timestamp),
+                transaction_hash: None,
+                transaction_index: None,
+                log_index: None,
+                removed: false,
+            })
+            .collect()
+    };
+    let hash = block_hash.unwrap_or(B256::ZERO);
+    let gas = result.tx_gas_used();
+    match result {
+        ExecutionResult::Success { output, .. } => {
+            LogOrRevert::new_success(block_number, hash, gas, logs, output.clone().into_data())
+        }
+        ExecutionResult::Revert { output, .. } => LogOrRevert::new_failure(
+            block_number,
+            hash,
+            gas,
+            (!ignore_logs).then_some(logs),
+            Some(RevertError::new(output.clone()).to_string()),
+        ),
+        ExecutionResult::Halt { reason, .. } => LogOrRevert::new_failure(
+            block_number,
+            hash,
+            gas,
+            (!ignore_logs).then_some(logs),
+            Some(format!("execution halted: {reason:?}")),
+        ),
+    }
+}
+
+#[cfg(test)]
+mod call_x_tests {
+    use super::call_x_result;
+    use alloy_primitives::{Bytes, Log, B256};
+    use revm::context_interface::result::{
+        ExecutionResult, HaltReason, Output, ResultGas, SuccessReason,
+    };
+
+    fn success() -> ExecutionResult {
+        ExecutionResult::Success {
+            reason: SuccessReason::Return,
+            gas: ResultGas::new_with_state_gas(30_000, 5_000, 26_000, 1_000),
+            logs: vec![Log::default()],
+            output: Output::Call(Bytes::from_static(&[0xab])),
+        }
+    }
+
+    #[test]
+    fn canonical_call_x_preserves_execution_gas_logs_and_hash() {
+        let hash = B256::repeat_byte(0x11);
+        let response = call_x_result(&success(), 42, Some(hash), 100, false);
+        assert_eq!(response.status, 1);
+        assert_eq!(response.used_gas, 26_000); // receipt gas honors the calldata floor.
+        assert_eq!(response.returns.as_ref(), &[0xab]);
+        assert_eq!(response.block_hash, hash);
+        let log = &response.logs.unwrap()[0];
+        assert_eq!(log.block_hash, Some(hash));
+        assert_eq!(log.block_number, Some(42));
+        assert_eq!(log.block_timestamp, Some(100));
+        assert_eq!(
+            (log.transaction_hash, log.transaction_index, log.log_index),
+            (None, None, None)
+        );
+    }
+
+    #[test]
+    fn pending_call_x_does_not_claim_canonical_or_flashblock_metadata() {
+        let response = call_x_result(&success(), 43, None, 101, false);
+        assert_eq!(response.block_hash, B256::ZERO);
+        assert_eq!(response.logs.unwrap()[0].block_hash, None);
+        assert_eq!(response.flashblock_base_hash, None);
+        assert_eq!(response.flashblock_index, None);
+        assert_eq!(response.flashblock_number, None);
+        assert!(call_x_result(&success(), 43, None, 101, true).logs.unwrap().is_empty());
+    }
+
+    #[test]
+    fn reverted_call_x_preserves_failure_contract_and_ignore_logs() {
+        let result: ExecutionResult = ExecutionResult::Revert {
+            gas: ResultGas::new_with_state_gas(30_000, 0, 0, 0),
+            logs: Vec::new(),
+            output: Bytes::from_static(&[0xde, 0xad]),
+        };
+        for ignore in [false, true] {
+            let response = call_x_result(&result, 42, None, 100, ignore);
+            assert_eq!(response.status, 0);
+            assert_eq!(response.used_gas, 30_000);
+            assert!(response.returns.is_empty());
+            assert!(response.revert_error.unwrap().contains("execution reverted"));
+            assert_eq!(response.logs.is_none(), ignore);
+        }
+    }
+
+    #[test]
+    fn halted_call_x_returns_reason_and_consumed_gas() {
+        let result = ExecutionResult::Halt {
+            reason: HaltReason::InvalidFEOpcode,
+            gas: ResultGas::new_with_state_gas(90_000, 0, 0, 0),
+            logs: Vec::new(),
+        };
+        let response = call_x_result(&result, 42, None, 100, false);
+        assert_eq!(response.status, 0);
+        assert_eq!(response.used_gas, 90_000);
+        assert!(response.returns.is_empty());
+        assert!(response.revert_error.unwrap().contains("InvalidFEOpcode"));
     }
 }
