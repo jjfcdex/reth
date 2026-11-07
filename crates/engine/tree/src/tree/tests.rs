@@ -21,7 +21,7 @@ use alloy_rpc_types_engine::{
 };
 use assert_matches::assert_matches;
 use reth_chain_state::{test_utils::TestBlockBuilder, BlockState};
-use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
+use reth_chainspec::{ChainSpec, ChainSpecBuilder, HOLESKY, MAINNET};
 use reth_engine_primitives::{EngineApiValidator, ForkchoiceStatus, NoopInvalidBlockHook};
 use reth_ethereum_consensus::EthBeaconConsensus;
 use reth_ethereum_engine_primitives::{EthEngineTypes, EthPayloadAttributes};
@@ -201,7 +201,8 @@ impl TestHarness {
 
         let consensus = Arc::new(EthBeaconConsensus::new(chain_spec.clone()));
 
-        let provider = MockEthProvider::default();
+        let mut provider = MockEthProvider::default();
+        provider.chain_spec = chain_spec.clone();
 
         let payload_validator = MockEngineValidator;
 
@@ -3183,4 +3184,122 @@ async fn test_on_backfill_sync_finished_opstack_retriggers_backfill_to_buffered_
 #[tokio::test]
 async fn test_on_backfill_sync_finished_eth_retriggers_backfill_to_buffered_finalized() {
     assert_post_backfill_recheck_retriggers_to_buffered_target(EngineApiKind::Ethereum).await;
+}
+
+#[test]
+fn base_pipeline_threshold_gap_boundaries() {
+    let mut harness = TestHarness::new(MAINNET.clone());
+    assert_eq!(harness.tree.pipeline_run_threshold, 32);
+    assert!(!harness.tree.exceeds_backfill_run_threshold(100, 132));
+    assert!(harness.tree.exceeds_backfill_run_threshold(100, 133));
+
+    // Inject startup resolution without changing process-wide environment in parallel tests.
+    harness.tree.pipeline_run_threshold = pipeline_threshold::from_reader(8453, || None);
+    assert!(!harness.tree.exceeds_backfill_run_threshold(100, 1300));
+    assert!(harness.tree.exceeds_backfill_run_threshold(100, 1301));
+    assert!(!harness.tree.exceeds_backfill_run_threshold(100, 100));
+    assert!(!harness.tree.exceeds_backfill_run_threshold(100, 99));
+    for threshold in [32, 320] {
+        harness.tree.pipeline_run_threshold =
+            pipeline_threshold::from_reader(8453, || Some(threshold.to_string().into()));
+        assert!(!harness.tree.exceeds_backfill_run_threshold(100, 100 + threshold));
+        assert!(harness.tree.exceeds_backfill_run_threshold(100, 101 + threshold));
+    }
+}
+
+#[test]
+fn base_pipeline_threshold_existing_target_skips_backfill() {
+    let mut harness = TestHarness::new(MAINNET.clone());
+    harness.tree.pipeline_run_threshold = 1200;
+    harness.tree.engine_kind = EngineApiKind::OpStack;
+    let block = harness.block_builder.get_executed_blocks(0..1).next().unwrap();
+    let target = block.recovered_block().hash();
+    harness.provider.add_block(target, block.recovered_block().clone_block());
+    harness.tree.state.forkchoice_state_tracker.set_latest(
+        ForkchoiceState {
+            head_block_hash: target,
+            safe_block_hash: target,
+            finalized_block_hash: target,
+        },
+        ForkchoiceStatus::Syncing,
+    );
+    assert_eq!(harness.tree.backfill_sync_target(0, 1201, None), None);
+}
+
+#[test]
+fn base_pipeline_threshold_missing_parent_downloads_range() {
+    let mut harness = TestHarness::new(MAINNET.clone());
+    harness.tree.pipeline_run_threshold = 1200;
+    harness.tree.engine_kind = EngineApiKind::OpStack;
+    let target = B256::from([0xaa; 32]);
+    harness.tree.state.forkchoice_state_tracker.set_latest(
+        ForkchoiceState {
+            head_block_hash: target,
+            safe_block_hash: target,
+            finalized_block_hash: B256::ZERO,
+        },
+        ForkchoiceStatus::Syncing,
+    );
+    let parent_hash = B256::from([0xbb; 32]);
+    assert_matches!(
+        harness.tree.on_disconnected_downloaded_block(
+            BlockNumHash::new(215, target),
+            BlockNumHash::new(214, parent_hash),
+            BlockNumHash::new(100, B256::ZERO),
+        ),
+        Some(TreeEvent::Download(DownloadRequest::BlockRange(hash, 114))) if hash == parent_hash
+    );
+    assert_matches!(
+        harness.tree.on_disconnected_downloaded_block(
+            BlockNumHash::new(1301, target),
+            BlockNumHash::new(1300, parent_hash),
+            BlockNumHash::new(100, B256::ZERO),
+        ),
+        Some(TreeEvent::BackfillAction(BackfillAction::Start(_)))
+    );
+}
+
+#[tokio::test]
+async fn base_pipeline_threshold_post_finish_gap_115_downloads() {
+    let mut harness = TestHarness::new(MAINNET.clone());
+    harness.tree.pipeline_run_threshold = 1200;
+    harness.tree.engine_kind = EngineApiKind::OpStack;
+    let base_chain: Vec<_> = harness.block_builder.get_executed_blocks(0..1).collect();
+    harness = harness.with_blocks(base_chain.clone());
+    harness
+        .fcu_to(base_chain.last().unwrap().recovered_block().hash(), ForkchoiceStatus::Valid)
+        .await;
+    let chain = harness.block_builder.create_fork(base_chain[0].recovered_block(), 116);
+    let target = chain.last().unwrap().clone();
+    let tip = chain[0].clone();
+    assert_eq!(target.number() - tip.number(), 115);
+    harness.tree.state.buffer.insert_block(target.clone_sealed_block());
+    harness.tree.state.forkchoice_state_tracker.set_latest(
+        ForkchoiceState {
+            head_block_hash: target.hash(),
+            safe_block_hash: target.hash(),
+            finalized_block_hash: B256::ZERO,
+        },
+        ForkchoiceStatus::Syncing,
+    );
+    let tip_number = tip.number();
+    harness.provider.add_block(tip.hash(), tip.into_block());
+    harness
+        .tree
+        .on_backfill_sync_finished(ControlFlow::Continue { block_number: tip_number })
+        .unwrap();
+    assert_matches!(
+        harness.from_tree_rx.try_recv().unwrap(),
+        EngineApiEvent::Download(DownloadRequest::BlockRange(hash, 115)) if hash == target.parent_hash()
+    );
+}
+
+#[test]
+fn base_pipeline_threshold_constructor_uses_provider_chain() {
+    let chain_spec = Arc::new(ChainSpecBuilder::mainnet().chain(8453u64.into()).build());
+    let harness = TestHarness::new(chain_spec);
+    // Read without mutating process state; parsing/default cases use injected readers below.
+    let expected =
+        pipeline_threshold::from_reader(8453, || std::env::var_os("BASE_PIPELINE_RUN_THRESHOLD"));
+    assert_eq!(harness.tree.pipeline_run_threshold, expected);
 }

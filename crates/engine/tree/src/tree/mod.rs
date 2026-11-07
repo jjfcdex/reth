@@ -16,6 +16,7 @@ use reth_chain_state::{
     CanonicalInMemoryState, ExecutedBlock, ExecutionTimingStats, MemoryOverlayStateProvider,
     NewCanonicalChain,
 };
+use reth_chainspec::EthChainSpec;
 use reth_consensus::{Consensus, FullConsensus};
 use reth_engine_primitives::{
     BeaconEngineMessage, BeaconOnNewPayloadError, ConsensusEngineEvent, ExecutionPayload,
@@ -30,8 +31,8 @@ use reth_primitives_traits::{
 };
 use reth_provider::{
     BalProvider, BlockExecutionOutput, BlockExecutionResult, BlockNumReader, BlockReader,
-    ChangeSetReader, DatabaseProviderFactory, LatestStateProvider, ProviderError,
-    PruneCheckpointReader, SaveBlocksInput, StageCheckpointReader, StateProviderBox,
+    ChainSpecProvider, ChangeSetReader, DatabaseProviderFactory, LatestStateProvider,
+    ProviderError, PruneCheckpointReader, SaveBlocksInput, StageCheckpointReader, StateProviderBox,
     StateProviderFactory, StateReader, StorageChangeSetReader, StorageSettingsCache,
     TransactionVariant, TryIntoHistoricalStateProvider,
 };
@@ -67,6 +68,7 @@ mod metrics;
 pub mod payload_processor;
 pub mod payload_validator;
 mod persistence_state;
+mod pipeline_threshold;
 pub mod precompile_cache;
 pub mod state_root_strategy;
 #[cfg(test)]
@@ -376,6 +378,8 @@ where
     payload_builder: PayloadBuilderHandle<T>,
     /// Configuration settings.
     config: TreeConfig,
+    /// Startup-resolved maximum gap for individual-block sync.
+    pipeline_run_threshold: u64,
     /// Metrics for the engine api.
     metrics: EngineApiMetrics,
     /// The engine API variant of this handler
@@ -416,6 +420,7 @@ where
             .field("canonical_in_memory_state", &self.canonical_in_memory_state)
             .field("payload_builder", &self.payload_builder)
             .field("config", &self.config)
+            .field("pipeline_run_threshold", &self.pipeline_run_threshold)
             .field("metrics", &self.metrics)
             .field("engine_kind", &self.engine_kind)
             .field("evm_config", &self.evm_config)
@@ -465,7 +470,11 @@ where
         engine_kind: EngineApiKind,
         evm_config: C,
         runtime: reth_tasks::Runtime,
-    ) -> Self {
+    ) -> Self
+    where
+        P: ChainSpecProvider,
+    {
+        let pipeline_run_threshold = pipeline_threshold::from_env(provider.chain_spec().chain_id());
         let (incoming_tx, incoming) = crossbeam_channel::unbounded();
 
         let (payload_builds, payload_build_finished) = PayloadBuildTracker::new();
@@ -483,6 +492,7 @@ where
             canonical_in_memory_state,
             payload_builder,
             config,
+            pipeline_run_threshold,
             metrics: Default::default(),
             incoming_tx,
             engine_kind,
@@ -514,6 +524,8 @@ where
         evm_config: C,
         runtime: reth_tasks::Runtime,
     ) -> (Sender<FromEngine<EngineApiRequest<T, N>, N::Block>>, UnboundedReceiver<EngineApiEvent<N>>)
+    where
+        P: ChainSpecProvider,
     {
         let best_block_number = provider.best_block_number().unwrap_or(0);
         let header = provider.sealed_header(best_block_number).ok().flatten().unwrap_or_default();
@@ -2752,7 +2764,7 @@ where
     /// If the `local_tip` is greater than the `block`, then this will return false.
     #[inline]
     const fn exceeds_backfill_run_threshold(&self, local_tip: u64, block: u64) -> bool {
-        block > local_tip && block - local_tip > MIN_BLOCKS_FOR_PIPELINE_RUN
+        block > local_tip && block - local_tip > self.pipeline_run_threshold
     }
 
     /// Returns how far the local tip is from the given block. If the local tip is at the same
